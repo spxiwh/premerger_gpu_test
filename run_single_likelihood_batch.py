@@ -1,6 +1,7 @@
 from pycbc.types import timeseries as pycbc_ts
 import pycbc.psd as pycbc_psd
 from pycbc.strain.strain import execute_cached_fft
+import cupy as cp
 
 from pre_merger_utils import generate_pre_merger_psds
 from pre_merger_utils import pre_process_data_lisa_pre_merger
@@ -69,6 +70,7 @@ def initialization(shared_context):
 
 def log_likelihood(params, shared_context):
     # What would params look like? Is it a structured cupy ndarray?
+    pass
 
 def main() -> None:
     shared_context = {}
@@ -86,6 +88,42 @@ def main() -> None:
     shared_context['psd_file'] = 'model_AE_TDI1_SMOOTH_optimistic.txt.gz'
 
     initialization(shared_context)
+
+    # Create structured cupy array with 10 rows
+    dtype = cp.dtype([
+        ('mass1', cp.float64),
+        ('mass2', cp.float64),
+        ('spin1z', cp.float64),
+        ('spin2z', cp.float64),
+        ('additional_end_data', cp.float64),
+        ('distance', cp.float64),
+        ('eclipticlongitude', cp.float64),
+        ('eclipticlatitude', cp.float64),
+        ('inclination', cp.float64),
+        ('polarization', cp.float64),
+        ('coa_phase', cp.float64),
+        ('tc', cp.float64),
+    ])
+    
+    params = cp.zeros(10, dtype=dtype)
+    
+    # Set values for each row (currently all rows have the same values)
+    for i in range(10):
+        params[i]['mass1'] = 1000000.0
+        params[i]['mass2'] = 1000000.0
+        params[i]['spin1z'] = 0
+        params[i]['spin2z'] = 0
+        params[i]['additional_end_data'] = 1050
+        params[i]['distance'] = 27658.011507544677
+        params[i]['eclipticlongitude'] = 3.448296944257913
+        params[i]['eclipticlatitude'] = 0.44491231446252155
+        params[i]['inclination'] = 0.9238365050097769
+        params[i]['polarization'] = 3.4236020095353483
+        params[i]['coa_phase'] = 2.661901610522322
+        params[i]['tc'] = 1931852406.9997194
+    
+    # Call log_likelihood
+    log_likelihood(params, shared_context)
 
     print(shared_context)
 
