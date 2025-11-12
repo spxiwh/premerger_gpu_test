@@ -108,19 +108,18 @@ def main() -> None:
     params = cp.zeros(10, dtype=dtype)
     
     # Set values for each row (currently all rows have the same values)
-    for i in range(10):
-        params[i]['mass1'] = 1000000.0
-        params[i]['mass2'] = 1000000.0
-        params[i]['spin1z'] = 0
-        params[i]['spin2z'] = 0
-        params[i]['additional_end_data'] = 1050
-        params[i]['distance'] = 27658.011507544677
-        params[i]['eclipticlongitude'] = 3.448296944257913
-        params[i]['eclipticlatitude'] = 0.44491231446252155
-        params[i]['inclination'] = 0.9238365050097769
-        params[i]['polarization'] = 3.4236020095353483
-        params[i]['coa_phase'] = 2.661901610522322
-        params[i]['tc'] = 1931852406.9997194
+    params['mass1'] = 1000000.0
+    params['mass2'] = 1000000.0
+    params['spin1z'] = 0
+    params['spin2z'] = 0
+    params['additional_end_data'] = 1050
+    params['distance'] = 27658.011507544677
+    params['eclipticlongitude'] = 3.448296944257913
+    params['eclipticlatitude'] = 0.44491231446252155
+    params['inclination'] = 0.9238365050097769
+    params['polarization'] = 3.4236020095353483
+    params['coa_phase'] = 2.661901610522322
+    params['tc'] = 1931852406.9997194
     
     # Call log_likelihood
     log_likelihood(params, shared_context)
