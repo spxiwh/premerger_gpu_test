@@ -5,6 +5,7 @@ import cupy as cp
 
 from pre_merger_utils import generate_pre_merger_psds
 from pre_merger_utils import pre_process_data_lisa_pre_merger
+from BBHX_Phenom_GPU import _bbhx_fd
 
 # We agreed not to use our own inference toolkits, but PyCBC (and it's
 # standard utilities, like timeseries) I think are still fair game.
@@ -74,7 +75,19 @@ def log_likelihood(params, shared_context):
     dt_end_samples = ((shared_context['tlen'] - (params['tc'] - shared_context['epoch'])) * shared_context['sample_rate']).astype(cp.int32)
     forward_zeroes = dt_end_samples +shared_context['extra_forward_zeroes'] + shared_context['kernel_length']
 
-    waveforms_A, waveforms_E = generate_waveform(params)
+    # Call _bbhx_fd with parameters from shared_context and params
+    waveforms = _bbhx_fd(
+        ifos=['LISA_A', 'LISA_E'],
+        tdi=shared_context['tdi'],
+        t_obs_start=shared_context['t_obs_start'],
+        delta_f=shared_context['delta_f'],
+        f_final=shared_context['f_final'],
+        mode_array=shared_context['mode_array'],
+        t_offset=shared_context['t_offset'],
+        **params
+    )
+    waveforms_A = waveforms['LISA_A']
+    waveforms_E = waveforms['LISA_E']
 
 def main() -> None:
     shared_context = {}
