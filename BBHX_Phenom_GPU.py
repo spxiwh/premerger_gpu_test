@@ -147,6 +147,11 @@ def _bbhx_fd(
     
     """Function to generate frequency-domain waveforms using BBHx.
     
+    This function supports both scalar and vectorized inputs. When vectorized,
+    the physical parameters (masses, spins, sky location, etc.) can be passed
+    as CuPy or NumPy arrays, and the waveform generator will process them
+    accordingly.
+    
     Parameters
     ----------
     ifos : list
@@ -179,11 +184,41 @@ def _bbhx_fd(
         ``mf_min``. Must be ``False`` if ``mf_min`` is specfied.
     enable_flower_warn: bool
         If False, it will turn off the warning from `f_lower` calculation.
+    **params : dict
+        Waveform parameters. The following parameters can be either scalars
+        (for single waveform generation) or arrays (for vectorized batch 
+        generation):
+        
+        - mass1, mass2 : Mass of each component (solar masses)
+        - spin1z, spin2z : Dimensionless spin of each component
+        - distance : Luminosity distance (Mpc)
+        - inclination : Inclination angle (radians)
+        - coa_phase : Coalescence phase (radians)
+        - tc : Coalescence time (GPS seconds)
+        - eclipticlongitude, eclipticlatitude : Sky location (radians)
+        - polarization : Polarization angle (radians)
+        - f_ref : Reference frequency (Hz), optional
+        
+        The following parameters should be scalars:
+        
+        - t_offset : Time offset (seconds) or 'TIME_OFFSET_20_DEGREES'
+        - t_obs_start : Observation start time (seconds)
+        - delta_f : Frequency spacing (Hz)
+        - f_final : Maximum frequency (Hz)
+        - mode_array : List of modes to include
+        - approximant : Waveform approximant name
     
     Returns
     -------
     dict
         A dictionary containing the the waveforms for each interferometer.
+    
+    Notes
+    -----
+    When using vectorized inputs, the chirptime and f_min calculations are
+    performed using the first element of the mass arrays. This is sufficient
+    for determining the frequency range for waveform generation when all
+    systems have similar masses.
     """
 
     if ifos is None:
@@ -192,24 +227,35 @@ def _bbhx_fd(
     from pycbc.types import FrequencySeries, Array
     from pycbc import pnutils
 
-    m1 = np.float64(params['mass1'])
-    m2 = np.float64(params['mass2'])
-    a1 = np.float64(params['spin1z'])
-    a2 = np.float64(params['spin2z'])
-    inc = np.float64(params['inclination'])
-    dist = np.float64(pnutils.megaparsecs_to_meters(params['distance']))
-    f_ref = np.float64(params['f_ref'])
-    phi_ref = np.float64(params['coa_phase']) # phase at f_ref
+    # Extract parameters, keeping them as arrays if they are arrays (CuPy or NumPy)
+    # or scalars if they are scalars
+    m1 = params['mass1']
+    m2 = params['mass2']
+    a1 = params['spin1z']
+    a2 = params['spin2z']
+    inc = params['inclination']
+    
+    # Handle distance conversion - works with both scalars and arrays
+    dist = pnutils.megaparsecs_to_meters(params['distance'])
+    
+    # f_ref can be scalar or array, or use default
+    if 'f_ref' in params:
+        f_ref = params['f_ref']
+    else:
+        # If not provided, use 0.0 (scalar default)
+        f_ref = np.float64(0.0)
+    
+    phi_ref = params['coa_phase']  # phase at f_ref
     if 't_offset' in params:
         if params['t_offset'] == 'TIME_OFFSET_20_DEGREES':
             t_offset = TIME_OFFSET_20_DEGREES
         else:
-            t_offset = np.float64(params['t_offset']) # in seconds
+            t_offset = params['t_offset']
     else:
         raise Exception("Must set `t_offset`, if you don't have a preferred value, \
 please set it to be the default value %f, which will put LISA behind \
 the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
-    t_obs_start = np.float64(params['t_obs_start']) # in seconds
+    t_obs_start = params['t_obs_start']
     mode_array = list(params["mode_array"])
     num_interp = int(num_interp)
     length = int(length) if length is not None else None
@@ -217,10 +263,10 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     
 
     if ref_frame == 'LISA':
-        t_ref_lisa = np.float64(params['tc']) + t_offset
-        lam = np.float64(params['eclipticlongitude'])
-        beta = np.float64(params['eclipticlatitude'])
-        psi = np.float64(params['polarization'])
+        t_ref_lisa = params['tc'] + t_offset
+        lam = params['eclipticlongitude']
+        beta = params['eclipticlatitude']
+        psi = params['polarization']
         # Transform to SSB frame
         t_ref, lam, beta, psi = lisa_to_ssb(
             t_lisa=t_ref_lisa,
@@ -230,10 +276,10 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
             t0=0
         )
     elif ref_frame == 'SSB':
-        t_ref = np.float64(params['tc']) + t_offset
-        lam = np.float64(params['eclipticlongitude'])
-        beta = np.float64(params['eclipticlatitude'])
-        psi = np.float64(params['polarization'])
+        t_ref = params['tc'] + t_offset
+        lam = params['eclipticlongitude']
+        beta = params['eclipticlatitude']
+        psi = params['polarization']
         # Don't need to update variable names,
         # because wave_gen receives parameters in SSB frame.
         t_ref_lisa, _, _, _ = ssb_to_lisa(
@@ -250,18 +296,24 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     # We follow the convention used in LAL and set the frequency based on the
     # highest m mode. This means that lower m modes will start at later times.
     max_m_mode = max([mode[1] for mode in mode_array])
+    
+    # For vectorized inputs, we need scalar masses for chirptime calculation
+    # Use the first element if arrays, or the scalar value directly
+    m1_scalar = m1[0] if hasattr(m1, '__getitem__') else m1
+    m2_scalar = m2[0] if hasattr(m2, '__getitem__') else m2
+    
     if ('f_lower' not in params) or (params['f_lower'] < 0):
         # the default value of 'f_lower' in PyCBC is -1.
         t_max = chirptime(
-            m1=m1, m2=m2, f_lower=interp_f_lower, m_mode=max_m_mode
+            m1=m1_scalar, m2=m2_scalar, f_lower=interp_f_lower, m_mode=max_m_mode
         )
         if t_obs_start > t_max:
             # Avoid "above the interpolation range" issue.
             f_min = interp_f_lower
         else:
             tf_track = interpolated_tf(
-                m1,
-                m2,
+                m1_scalar,
+                m2_scalar,
                 m_mode=max_m_mode,
                 num_interp=num_interp,
                 f_lower=interp_f_lower,
@@ -270,14 +322,14 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     else:
         f_min = np.float64(params['f_lower']) # in Hz
         t_max = chirptime(
-            m1=m1, m2=m2, f_lower=interp_f_lower, m_mode=max_m_mode
+            m1=m1_scalar, m2=m2_scalar, f_lower=interp_f_lower, m_mode=max_m_mode
         )
         if t_obs_start > t_max:
             f_min_tobs = interp_f_lower
         else:
             tf_track = interpolated_tf(
-                m1,
-                m2,
+                m1_scalar,
+                m2_scalar,
                 m_mode=max_m_mode,
                 num_interp=num_interp,
                 f_lower=interp_f_lower,
@@ -295,7 +347,8 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     # We only do this if `mf_min` is not specified. If it is then we set this
     # None and can easily cache the generator.
     if mf_min is None:
-        log_mf_min = math.log(f_min*MTSUN_SI*(m1+m2)) * 25
+        # Use scalar masses for mf_min calculation
+        log_mf_min = math.log(f_min*MTSUN_SI*(m1_scalar+m2_scalar)) * 25
         if cache_generator:
             log_mf_min = int(log_mf_min)
     else:
@@ -319,13 +372,13 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
             # Besides, soget_td_waveform_from_fd or _base_get_td_waveform_from_fd
             # will set nparams['delta_f'] = 1.0 / fudge_duration, and this is not
             # same as 1 / t_obs_start.
-            df = np.float64(params['delta_f'])
+            df = params['delta_f']
         else:
             raise Exception("Please set 'delta_f' in **params.")
         # It's likely this will be called repeatedly with the same values
         # in many applications.
         if 'f_final' in params and params['f_final'] != 0:
-            freqs = cached_arange(0, np.float64(params['f_final']), df)
+            freqs = cached_arange(0, params['f_final'], df)
         else:
             raise Exception("Please set 'f_final' in **params.")
     else:
