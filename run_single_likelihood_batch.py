@@ -65,12 +65,16 @@ def initialization(shared_context):
 
     shared_context['lisa_a_strain_fd'] = lisa_a_strain_fd
     shared_context['lisa_e_strain_fd'] = lisa_e_strain_fd
-    shared_context['epoch'] = lisa_a_strain_fd._epoch # Start time of array
+    shared_context['epoch'] = float(lisa_a_strain_fd._epoch) # Start time of array
 
 
 def log_likelihood(params, shared_context):
-    # What would params look like? Is it a structured cupy ndarray?
-    pass
+    # Identify how much zeroing on the front is needed first
+    print(params['tc'])
+    dt_end_samples = ((shared_context['tlen'] - (params['tc'] - shared_context['epoch'])) * shared_context['sample_rate']).astype(cp.int32)
+    forward_zeroes = dt_end_samples +shared_context['extra_forward_zeroes'] + shared_context['kernel_length']
+
+    waveforms_A, waveforms_E = generate_waveform(params)
 
 def main() -> None:
     shared_context = {}
@@ -89,37 +93,38 @@ def main() -> None:
 
     initialization(shared_context)
 
-    # Create structured cupy array with 10 rows
-    dtype = cp.dtype([
-        ('mass1', cp.float64),
-        ('mass2', cp.float64),
-        ('spin1z', cp.float64),
-        ('spin2z', cp.float64),
-        ('additional_end_data', cp.float64),
-        ('distance', cp.float64),
-        ('eclipticlongitude', cp.float64),
-        ('eclipticlatitude', cp.float64),
-        ('inclination', cp.float64),
-        ('polarization', cp.float64),
-        ('coa_phase', cp.float64),
-        ('tc', cp.float64),
-    ])
-    
-    params = cp.zeros(10, dtype=dtype)
+    # Cupy doesn't appear to support structured arrays, so per-field arrays
+    # seem needed.
+    field_names = [
+        'mass1','mass2','spin1z','spin2z',
+        'distance','eclipticlongitude','eclipticlatitude',
+        'inclination','polarization','coa_phase','tc'
+    ]
+
+    # create a dict of per-field CuPy arrays (10 rows each)
+    params = {name: cp.zeros(10, dtype=cp.float64) for name in field_names}
     
     # Set values for each row (currently all rows have the same values)
-    params['mass1'] = 1000000.0
-    params['mass2'] = 1000000.0
-    params['spin1z'] = 0
-    params['spin2z'] = 0
-    params['additional_end_data'] = 1050
-    params['distance'] = 27658.011507544677
-    params['eclipticlongitude'] = 3.448296944257913
-    params['eclipticlatitude'] = 0.44491231446252155
-    params['inclination'] = 0.9238365050097769
-    params['polarization'] = 3.4236020095353483
-    params['coa_phase'] = 2.661901610522322
-    params['tc'] = 1931852406.9997194
+    params['mass1'][:] = 1000000.0
+    params['mass2'][:] = 1000000.0
+    params['spin1z'][:] = 0
+    params['spin2z'][:] = 0
+    params['distance'][:] = 27658.011507544677
+    params['eclipticlongitude'][:] = 3.448296944257913
+    params['eclipticlatitude'][:] = 0.44491231446252155
+    params['inclination'][:] = 0.9238365050097769
+    params['polarization'][:] = 3.4236020095353483
+    params['coa_phase'][:] = 2.661901610522322
+    params['tc'][:] = 1931852406.9997194
+
+    # Some top-level constant waveform parameters
+    shared_context['tdi'] = '1.5'
+    shared_context['t_obs_start'] = shared_context['tlen']
+    shared_context['f_final'] = shared_context['sample_rate'] / 2
+    # cutoff_deltat, are they needed?
+    shared_context['approximant'] = 'BBHX_PhenomD'
+    shared_context['t_offset'] = 7365189.431698299
+    shared_context['mode_array'] = [(2,2)]
     
     # Call log_likelihood
     log_likelihood(params, shared_context)
