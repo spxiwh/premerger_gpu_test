@@ -147,6 +147,11 @@ def _bbhx_fd(
     
     """Function to generate frequency-domain waveforms using BBHx.
     
+    This function supports both scalar and vectorized inputs. When vectorized,
+    the physical parameters (masses, spins, sky location, etc.) can be passed
+    as CuPy or NumPy arrays, and the waveform generator will process them
+    accordingly.
+    
     Parameters
     ----------
     ifos : list
@@ -179,11 +184,41 @@ def _bbhx_fd(
         ``mf_min``. Must be ``False`` if ``mf_min`` is specfied.
     enable_flower_warn: bool
         If False, it will turn off the warning from `f_lower` calculation.
+    **params : dict
+        Waveform parameters. The following parameters can be either scalars
+        (for single waveform generation) or arrays (for vectorized batch 
+        generation):
+        
+        - mass1, mass2 : Mass of each component (solar masses)
+        - spin1z, spin2z : Dimensionless spin of each component
+        - distance : Luminosity distance (Mpc)
+        - inclination : Inclination angle (radians)
+        - coa_phase : Coalescence phase (radians)
+        - tc : Coalescence time (GPS seconds)
+        - eclipticlongitude, eclipticlatitude : Sky location (radians)
+        - polarization : Polarization angle (radians)
+        - f_ref : Reference frequency (Hz), optional
+        
+        The following parameters should be scalars:
+        
+        - t_offset : Time offset (seconds) or 'TIME_OFFSET_20_DEGREES'
+        - t_obs_start : Observation start time (seconds)
+        - delta_f : Frequency spacing (Hz)
+        - f_final : Maximum frequency (Hz)
+        - mode_array : List of modes to include
+        - approximant : Waveform approximant name
     
     Returns
     -------
     dict
         A dictionary containing the the waveforms for each interferometer.
+    
+    Notes
+    -----
+    When using vectorized inputs, the chirptime and f_min calculations are
+    performed using the first element of the mass arrays. This is sufficient
+    for determining the frequency range for waveform generation when all
+    systems have similar masses.
     """
 
     if ifos is None:
