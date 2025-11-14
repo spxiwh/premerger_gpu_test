@@ -14,7 +14,6 @@ jobs:
       contents: read
     container:
       image: ghcr.io/uk-lisa-gs/shared_code_environment:latest-cuda12
-      options: --gpus all
     
     steps:
       - name: Checkout repository
