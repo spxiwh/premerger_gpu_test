@@ -9,10 +9,7 @@ on:
 
 jobs:
   run-likelihood-gpu:
-    runs-on: 
-      - self-hosted
-      - linux
-      - gpu
+    runs-on: gpu-linux-1
     permissions:
       contents: read
     container:
