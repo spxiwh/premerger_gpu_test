@@ -128,7 +128,7 @@ def main() -> None:
     params['inclination'][:] = 0.9238365050097769
     params['polarization'][:] = 3.4236020095353483
     params['coa_phase'][:] = 2.661901610522322
-    params['tc'][:] = 1931852406.9997194
+    params['tc'][:] = 1931852406.9997194 - 1893024018 # No idea what t=0 corresponds to, but using UTC times does not work
 
     # Some top-level constant waveform parameters
     shared_context['tdi'] = '1.5'

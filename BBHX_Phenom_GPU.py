@@ -14,6 +14,7 @@ def get_waveform_genner(log_mf_min=None, mf_min=None, run_phenomd=True):
     # log_mf_min.
     if mf_min is None:
         mf_min = math.exp(log_mf_min/25.)
+    print(mf_min, run_phenomd)
     wave_gen = BBHWaveformFD(
         amp_phase_kwargs=dict(
             run_phenomd=run_phenomd,
@@ -29,9 +30,8 @@ def cached_get_waveform_genner(*args, **kwargs):
     return get_waveform_genner(*args, **kwargs)
 
 
-@functools.lru_cache(maxsize=10)
 def cached_arange(start, stop, spacing):
-    return np.arange(start, stop, spacing)
+    return cp.arange(start, stop, spacing)
 
 
 @functools.lru_cache(maxsize=128)
@@ -394,6 +394,17 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
 
     # NOTE: This does not allow for the separation of multiple modes into
     # their own streams. All modes requested are combined into one stream.
+    print("t_obs", t_obs_start / YRSID_SI)
+    print("t_end", t_obs_end)
+    print("t_ref", t_ref)
+    t_obs_start = t_ref - t_obs_start
+    t_obs_end = t_ref
+
+    print(m1[0], m2[0], a1[0], a2[0], dist[0], phi_ref[0])
+    print(f_ref, inc[0], lam[0], beta[0], psi[0], t_ref[0])
+    print("freqs", 0, params['f_final'], df)
+    print(mode_array, direct, fill, squeeze, t_obs_start / YRSID_SI)
+    print(t_obs_end, compress, length)
     wave = wave_gen(
         m1, m2, a1, a2,
         dist, phi_ref, f_ref, inc, lam,
@@ -407,7 +418,6 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
         t_obs_end=t_obs_end,
         compress=compress,
         length=length,
-        shift_t_limits=shift_t_limits,
     )
     # For some reason, the shape is different depending on if direct is True
     # or False.
