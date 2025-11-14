@@ -1,0 +1,30 @@
+name: Run GPU Likelihood Batch
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  run-likelihood-gpu:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/uk-lisa-gs/shared_code_environment:latest-cuda12
+      options: --gpus all
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Verify CUDA availability
+        run: |
+          echo "Checking CUDA installation..."
+          nvidia-smi || echo "nvidia-smi not available"
+          python3 -c "import cupy; print(f'CuPy version: {cupy.__version__}')" || echo "CuPy not available"
+      
+      - name: Run likelihood batch script
+        run: |
+          echo "Running run_single_likelihood_batch.py..."
+          python3 run_single_likelihood_batch.py
