@@ -14,7 +14,6 @@ def get_waveform_genner(log_mf_min=None, mf_min=None, run_phenomd=True):
     # log_mf_min.
     if mf_min is None:
         mf_min = math.exp(log_mf_min/25.)
-    print(mf_min, run_phenomd)
     wave_gen = BBHWaveformFD(
         amp_phase_kwargs=dict(
             run_phenomd=run_phenomd,
@@ -135,8 +134,8 @@ def _bbhx_fd(
     ref_frame='LISA',
     tdi=None,
     sample_points=None,
-    length=1024,
-    direct=False,
+    length=None, # Not needed if direct not given
+    direct=True, # NOTE: Needed to avoid confusing segfault!
     num_interp=100,
     interp_f_lower=1e-4,
     cache_generator=True,
@@ -394,17 +393,8 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
 
     # NOTE: This does not allow for the separation of multiple modes into
     # their own streams. All modes requested are combined into one stream.
-    print("t_obs", t_obs_start / YRSID_SI)
-    print("t_end", t_obs_end)
-    print("t_ref", t_ref)
     t_obs_start = t_ref - t_obs_start
     t_obs_end = t_ref
-
-    print(m1[0], m2[0], a1[0], a2[0], dist[0], phi_ref[0])
-    print(f_ref, inc[0], lam[0], beta[0], psi[0], t_ref[0])
-    print("freqs", 0, params['f_final'], df)
-    print(mode_array, direct, fill, squeeze, t_obs_start / YRSID_SI)
-    print(t_obs_end, compress, length)
     wave = wave_gen(
         m1, m2, a1, a2,
         dist, phi_ref, f_ref, inc, lam,
@@ -421,54 +411,54 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     )
     # For some reason, the shape is different depending on if direct is True
     # or False.
-    if not direct:
-        wave = wave[0]
-
-    wanted = {}
-
-    if 'LISA_A' in ifos:
-        wanted['LISA_A'] = 0
-    if 'LISA_E' in ifos:
-        wanted['LISA_E'] = 1
-    if 'LISA_T' in ifos:
-        wanted['LISA_T'] = 2
+    
+    # Batched GPU waveform shape info available via return dictionary if needed.
 
     output = {}
-    # Convert outputs to PyCBC arrays
-    if sample_points is None:
-        length_of_wave = 1 / df
-        loc_of_signal_merger_within_wave = t_ref_lisa % length_of_wave
 
-        for channel, tdi_num in wanted.items():
-            output[channel] = FrequencySeries(
-                wave[tdi_num],
-                delta_f=df,
-                epoch=t_ref_lisa - loc_of_signal_merger_within_wave,
-                copy=False
-            )
-            # move the merge to the end of the vector
-            output[channel] = output[channel].cyclic_time_shift(
-                length_of_wave - loc_of_signal_merger_within_wave)
-            output[channel].start_time -= t_offset
-    else:
-        for channel, tdi_num in wanted.items():
-            output[channel] = Array(wave[tdi_num], copy=False)
-            if t_offset != 0:
-                # subtract t_offset from FD waveform
-                output[channel] *= np.exp(2j*np.pi*sample_points*t_offset)
+    # wave shape is (num_waveforms, num_channels, num_freq) for batched GPU implementation
+    if 'LISA_A' in ifos:
+        output['LISA_A'] = wave[:, 0, :]  # All waveforms, A channel
+    if 'LISA_E' in ifos:
+        output['LISA_E'] = wave[:, 1, :]  # All waveforms, E channel
+    if 'LISA_T' in ifos:
+        output['LISA_T'] = wave[:, 2, :]  # All waveforms, T channel
+
+    # Convert outputs to PyCBC arrays
+    #if sample_points is None:
+    #    length_of_wave = 1 / df
+    #    loc_of_signal_merger_within_wave = t_ref_lisa % length_of_wave
+    #
+    #    for channel, tdi_num in wanted.items():
+    #        output[channel] = FrequencySeries(
+    #            wave[tdi_num],
+    #            delta_f=df,
+    #            epoch=t_ref_lisa - loc_of_signal_merger_within_wave,
+    #            copy=False
+    #        )
+    #        # move the merge to the end of the vector
+    #        output[channel] = output[channel].cyclic_time_shift(
+    #            length_of_wave - loc_of_signal_merger_within_wave)
+    #        output[channel].start_time -= t_offset
+    #else:
+    #    for channel, tdi_num in wanted.items():
+    #        output[channel] = Array(wave[tdi_num], copy=False)
+    #        if t_offset != 0:
+    #            # subtract t_offset from FD waveform
+    #            output[channel] *= np.exp(2j*np.pi*sample_points*t_offset)
 
     # convert TDI version
-    if str(tdi) == '2.0':
-        from pycbc.psd.analytical_space import omega_length
-        if sample_points is None:
-            # assume all channels share the same sample_frequencies
-            omega_len = omega_length(f=output[channel].sample_frequencies, len_arm=L_SI)
-        else:
-            omega_len = omega_length(f=sample_points, len_arm=L_SI)
-        rescale = 2j*np.sin(2*omega_len)*np.exp(-2j*omega_len)
-        for key in output:
-            output[key] *= rescale
-    if str(tdi) not in ['1.5', '2.0']:
-        raise ValueError("The TDI version only supports '1.5' and '2.0' for now.")
+    #if str(tdi) == '2.0':
+    #    from pycbc.psd.analytical_space import omega_length
+    #    if sample_points is None:
+    #        # assume all channels share the same sample_frequencies
+    #        omega_len = omega_length(f=output[channel].sample_frequencies, len_arm=L_SI)
+    #    else:
+    #        omega_len = omega_length(f=sample_points, len_arm=L_SI)
+    #    rescale = 2j*np.sin(2*omega_len)*np.exp(-2j*omega_len)
+    #    for key in output:
+    #        output[key] *= rescale
+    #if str(tdi) not in ['1.5', '2.0']:
+    #    raise ValueError("The TDI version only supports '1.5' and '2.0' for now.")
 
     return output
