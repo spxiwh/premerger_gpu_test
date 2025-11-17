@@ -20,3 +20,13 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Project-specific ignores
+debug_output.log
+*.log
+*.sif
+plots/
+plots_opt/
+plots_opt2/
+model_AE_TDI1_SMOOTH_optimistic.txt.gz
+signal_0.hdf
