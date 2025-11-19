@@ -424,11 +424,11 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
 
     # wave shape is (num_waveforms, num_channels, num_freq) for batched GPU implementation
     if 'LISA_A' in ifos:
-        output['LISA_A'] = wave[:, 0, :]  # All waveforms, A channel
+        output['LISA_A'] = wave[..., 0, :]  # All waveforms, A channel
     if 'LISA_E' in ifos:
-        output['LISA_E'] = wave[:, 1, :]  # All waveforms, E channel
+        output['LISA_E'] = wave[..., 1, :]  # All waveforms, E channel
     if 'LISA_T' in ifos:
-        output['LISA_T'] = wave[:, 2, :]  # All waveforms, T channel
+        output['LISA_T'] = wave[..., 2, :]  # All waveforms, T channel
 
     # Convert outputs to PyCBC arrays
     #if sample_points is None:
