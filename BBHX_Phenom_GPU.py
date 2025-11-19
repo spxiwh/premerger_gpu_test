@@ -1,7 +1,10 @@
 import functools
 import math
 import numpy as np
-import cupy as cp
+try:
+    import cupy as cp  # Optional: used only if available
+except Exception:  # pragma: no cover - CPU environments may lack CuPy
+    cp = None
 from scipy.interpolate import interp1d
 from bbhx.utils.constants import MTSUN_SI, YRSID_SI, L_SI
 from bbhx.waveformbuild import BBHWaveformFD
@@ -30,7 +33,10 @@ def cached_get_waveform_genner(*args, **kwargs):
 
 
 def cached_arange(start, stop, spacing):
-    return cp.arange(start, stop, spacing)
+    # Use CuPy if available, otherwise fallback to NumPy for CPU environments
+    if cp is not None:
+        return cp.arange(start, stop, spacing)
+    return np.arange(start, stop, spacing)
 
 
 @functools.lru_cache(maxsize=128)

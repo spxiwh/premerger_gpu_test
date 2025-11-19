@@ -19,6 +19,10 @@ The pipeline computes log-likelihoods for batched gravitational waveform paramet
   - Per-channel overlap computations
   - ~350 ms per 100-waveform batch (after warm-up)
 
+- **`run_single_likelihood_batch_cpu.py`** - CPU-only reference equivalent
+  - Identical logic to `run_single_likelihood_batch.py` but uses NumPy arrays
+  - No CuPy/GPU operations; useful inside CPU-only containers
+
 - **`run_single_likelihood_batch_optimized.py`** - First optimized version
   - Fused TD zeroing kernel (ElementwiseKernel)
   - Batched overlaps across channels
@@ -43,6 +47,10 @@ The pipeline computes log-likelihoods for batched gravitational waveform paramet
   - Breaks down timing by stage (waveform generation, whitening, zeroing, FFTs, overlaps)
   - Compares all three implementations side-by-side
 
+- **`run_single_likelihood_batch_cpu_profiled.py`** - CPU profiling equivalent
+  - Same stage-by-stage breakdown as GPU profile, but using NumPy
+  - Warm-up + 50 timed iterations for steady-state numbers
+
 - **`test_singularity.sh`** - Container environment test
   - Tests reference implementation in shared Docker environment
   - Uses Singularity to run `ghcr.io/uk-lisa-gs/shared_code_environment:latest-cuda12`
@@ -51,6 +59,7 @@ The pipeline computes log-likelihoods for batched gravitational waveform paramet
 ### Supporting Files
 
 - **`BBHX_Phenom_GPU.py`** - BBHx waveform generator wrapper
+  - CuPy is optional; falls back to NumPy when CuPy isn't available (CPU env)
 - **`pre_merger_utils.py`** - Utility functions for PSD generation and data preprocessing
 - **`space_coords.py`** - Coordinate transformation utilities
 - **`sourcings.sh`** - Environment setup for local development
@@ -87,6 +96,13 @@ python run_single_likelihood_batch_optimized2.py
 
 # Subsequent runs use cached Singularity image
 ./test_singularity.sh
+```
+
+### CPU-Only Run (Singularity)
+
+```bash
+# Run the CPU version inside the CPU image
+./test_singularity_cpu.sh
 ```
 
 ### Validation and Benchmarking
