@@ -183,7 +183,7 @@ def main() -> None:
     shared_context['cutoff_time'] = 86400*7
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
-    shared_context['data_file'] = 'signal_0.hdf'
+    shared_context['data_file'] = 'signal_0_new.hdf'
     shared_context['psd_file'] = 'model_AE_TDI1_SMOOTH_optimistic.txt.gz'
     shared_context['cache_generator'] = False
 
