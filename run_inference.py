@@ -5,16 +5,20 @@ Requires installing sequince package from: https://github.com/sequince-dev/sequi
 You may also need to install emcee to get it working (its meant to be optional
 but we missed an import).
 """
-
+from pathlib import Path
 from run_single_likelihood_batch_optimized import _bbhx_fd, _get_buffers, _ZERO_TD_F64
 import run_single_likelihood_batch as orig  # reuse initialization
 
 import matplotlib.pyplot as plt
+import numpy as np
 import cupy as cp
+import h5py
 
 from sequince import ParticleState
 from sequince.logging_utils import configure_logging
 from sequince.prebuilt_samplers import make_standard_bayesian_smc
+from sequince.callbacks import StatePlot, TracePlot
+from sequince.posterior import draw_additional_samples
 from orng import ArrayRNG
 
 def _log_likelihood_batch(params, shared_context):
@@ -161,6 +165,28 @@ def convert_to_parameters(particles, shared_context) -> dict:
         chirp_mass = particles[:, shared_context["parameters"].index("chirp_mass")]
         mass_ratio = particles[:, shared_context["parameters"].index("mass_ratio")]
         p['mass1'][:], p['mass2'][:] = chirp_mass_mass_ratio_to_component_masses(chirp_mass, mass_ratio)
+    if "tc" in shared_context["parameters"]:
+        p['tc'][:] = particles[:, shared_context["parameters"].index("tc")]
+    if "eclipticlongitude" in shared_context["parameters"]:
+        p['eclipticlongitude'][:] = particles[:, shared_context["parameters"].index("eclipticlongitude")]
+    if "sin_eclipticlatitude" in shared_context["parameters"]:
+        sin_elat = particles[:, shared_context["parameters"].index("sin_eclipticlatitude")]
+        p['eclipticlatitude'][:] = cp.arcsin(sin_elat)
+    elif "eclipticlatitude" in shared_context["parameters"]:
+        p['eclipticlatitude'][:] = particles[:, shared_context["parameters"].index("eclipticlatitude")]
+    if "cos_inclination" in shared_context["parameters"]:
+        cos_inc = particles[:, shared_context["parameters"].index("cos_inclination")]
+        p['inclination'][:] = cp.arccos(cos_inc)
+    elif "inclination" in shared_context["parameters"]:
+        p['inclination'][:] = particles[:, shared_context["parameters"].index("inclination")]
+    if "polarization" in shared_context["parameters"]:
+        p['polarization'][:] = particles[:, shared_context["parameters"].index("polarization")]
+    if "coa_phase" in shared_context["parameters"]:
+        p['coa_phase'][:] = particles[:, shared_context["parameters"].index("coa_phase")]
+    if "spin1z" in shared_context["parameters"]:
+        p['spin1z'][:] = particles[:, shared_context["parameters"].index("spin1z")]
+    if "spin2z" in shared_context["parameters"]:
+        p['spin2z'][:] = particles[:, shared_context["parameters"].index("spin2z")]
     # Set fixed parameters
     for k, v in shared_context["fixed_parameters"].items():
         p[k][:] = v
@@ -171,6 +197,9 @@ def main() -> None:
     # Create a CuPy RNG
     rng = ArrayRNG(backend='cupy', seed=42)
 
+    cutoff_time_days = 7
+
+
     # Enable logging
     configure_logging()
 
@@ -180,13 +209,15 @@ def main() -> None:
     shared_context['delta_f'] = 1./shared_context['tlen']
     shared_context['delta_t'] = 5
     shared_context['flen'] = shared_context['tlen']//2 + 1
-    shared_context['cutoff_time'] = 86400*7
+    # Cutoff time for pre-merger
+    shared_context['cutoff_time'] = 86400*cutoff_time_days
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
     shared_context['data_file'] = 'signal_0_new.hdf'
     shared_context['psd_file'] = 'model_AE_TDI1_SMOOTH_optimistic.txt.gz'
     shared_context['cache_generator'] = False
 
+    print("Initializing data and PSDs...")
     orig.initialization(shared_context)
 
     # Waveform/global params
@@ -197,20 +228,9 @@ def main() -> None:
     shared_context['t_offset'] = 7365189.431698299
     shared_context['mode_array'] = [(2,2)]
 
-    chirp_mass_bounds = (8e5, 9e5)  # in solar masses
-    mass_ratio_bounds = (0.5, 1.0)   # dimensionless
-    shared_context["bounds"] = cp.array([
-        chirp_mass_bounds,
-        mass_ratio_bounds
-    ], dtype=cp.float64)
-
-
-    shared_context["parameters"] = [
-        "chirp_mass",
-        "mass_ratio"
-    ]
-    # Fixed parameters set to true values
-    shared_context["fixed_parameters"] = {
+    true_parameters = {
+        "mass1": 1e6,
+        "mass2": 1e6,
         "spin1z": 0.0,
         "spin2z": 0.0,
         "distance": 27658.011507544677,
@@ -219,32 +239,80 @@ def main() -> None:
         "inclination": 0.9238365050097769,
         "polarization": 3.4236020095353483,
         "coa_phase": 2.661901610522322,
-        "tc": int(30*86400),    # 1931852406.9997194 is the true coalescence time in the original data
+        "tc": int(30*86400),    # True coalescence time in the original data
     }
 
-    # Print true chirp mass and mass ratio
-    mass1 = mass2 = 1e6
-    true_chirp_mass, true_mass_ratio = component_masses_to_chirp_mass_mass_ratio(mass1, mass2)
-    print(f"True chirp mass: {true_chirp_mass:.6e}, True mass ratio: {true_mass_ratio:.6e}")
+    prior_bounds = {
+        "chirp_mass": (8e5, 9e5),
+        "mass_ratio": (0.5, 1.0),
+        "tc": (30*86400 - 1800, 30*86400 + 1800),
+        "eclipticlongitude": (0, 2*cp.pi),
+        "sin_eclipticlatitude": (-1, 1),
+        "cos_inclination": (-1, 1),
+        "polarization": (0, cp.pi),
+        "coa_phase": (0, 2*cp.pi),
+        "spin1z": (-0.99, 0.99),
+        "spin2z": (-0.99, 0.99),
+        "distance": (1e4, 1e5),
+    }
+
+    # Parameters to sample
+    # We sample in the sin/cos of angles to get uniform priors since
+    # these are easier to handle in a rectangular box
+    shared_context["parameters"] = [
+        "chirp_mass",
+        "mass_ratio",
+        "tc",
+        # "spin1z",
+        # "spin2z",
+        "eclipticlongitude",
+        "sin_eclipticlatitude",
+        "cos_inclination",
+        "polarization",
+        "coa_phase",
+    ]
+    for param in shared_context["parameters"]:
+        if param not in prior_bounds:
+            raise ValueError(f"No prior bounds specified for parameter: {param}")
+    shared_context["bounds"] = cp.array([prior_bounds[param] for param in shared_context["parameters"]], dtype=cp.float64)
+    print(f"Prior bounds:\n{shared_context['bounds']}")
+    # Create bounds array
+    print(f"Sampling parameters: {shared_context['parameters']}")
+    # Fixed parameters set to true values
+    shared_context["fixed_parameters"] = {}
+    for k, v in true_parameters.items():
+        if k not in shared_context["parameters"]:
+            if "mass" in k and ("chirp_mass" in shared_context["parameters"] or "mass_ratio" in shared_context["parameters"]):
+                continue  # skip mass1/mass2 if sampling in mc/q
+            if "eclipticlatitude" == k and "sin_eclipticlatitude" in shared_context["parameters"]:
+                continue
+            if "inclination" == k and "cos_inclination" in shared_context["parameters"]:
+                continue
+            shared_context["fixed_parameters"][k] = v
+
+    print(f"Fixed parameters:\n{shared_context['fixed_parameters']}")
+
+    # Compute derived true parameters
+    true_parameters["chirp_mass"], true_parameters["mass_ratio"] = component_masses_to_chirp_mass_mass_ratio(
+        true_parameters["mass1"], true_parameters["mass2"]
+    )
+    true_parameters["sin_eclipticlatitude"] = np.sin(true_parameters["eclipticlatitude"])
+    true_parameters["cos_inclination"] = np.cos(true_parameters["inclination"])
 
     # Set batch size for likelihood evaluations
-    shared_context["batch_size"] = 50
-
-    # Test logl with out-of-bounds particles
-    x_test = cp.array([
-        [8.6e5, 0.6],    # valid
-        [9.1e5, 0.7],    # invalid (chirp mass too high)
-        [8.7e5, -4.0],    # invalid (mass ratio too high)
-        [8.8e5, 0.8]     # valid
-    ], dtype=cp.float64)
-    context = type('Context', (), {'shared': shared_context})
-    log_likelihood(x_test, context=context)
+    shared_context["batch_size"] = 200
 
     dims = len(shared_context["parameters"])
 
+    label = f"sampling_parameters_" + "_".join(shared_context["parameters"]) + "_settings"
+    outdir = Path("lisa_smbh_inference_results") / f"{cutoff_time_days}days" / label
+    outdir.mkdir(parents=True, exist_ok=True)
+    print(f"Results will be saved to: {outdir}")
+
     # Initialize particles from the prior
     # Real runs will need more
-    n_particles = 200
+    print("Initializing particles...")
+    n_particles = 500
     initial_particles = rng.uniform(low=shared_context["bounds"][:, 0], high=shared_context["bounds"][:, 1], size=(n_particles, dims))
     initial_log_weights = cp.full((n_particles,), -cp.log(cp.array(n_particles)))
     initial_state = ParticleState(
@@ -252,34 +320,61 @@ def main() -> None:
         log_weights=initial_log_weights
     )
 
+    print("Setting up SMC sampler...")
     # Use the prebuilt SMC with MiniPCN mutation
     # MiniPCN is the only sampler that supports the array API backends
     smc, _, base_shared_context = make_standard_bayesian_smc(
         log_prior=log_prior,
         log_likelihood=log_likelihood,
-        target_ess_ratio=0.7,
+        target_ess_ratio=0.9,
         max_temperature=1.0,
         min_delta=1e-8,
         always_resample=True,
         mutation="minipcn",
-        mutation_n_steps=20,    # May need more steps
+        mutation_n_steps=100,    # May need more steps
         particle_transform="affine",
         auto_normalize=True,
+        callbacks=[
+            TracePlot(outdir=outdir, filename="trace.png", parameter_labels=shared_context["parameters"]),
+            StatePlot(["temperature", "log_evidence"], outdir=outdir, filename="state.png")
+        ]
     )
 
     shared_context.update(base_shared_context)
 
+    print("Running SMC inference...")
     result = smc.run(initial_state, rng=rng, shared_context=shared_context)
+
+    print("SMC inference completed.")
+    posterior_samples = result.posterior_samples()
+
+    with h5py.File(outdir / "posterior_samples.h5", "w") as f:
+        for i, param in enumerate(shared_context["parameters"]):
+            f.create_dataset(param, data=cp.asnumpy(posterior_samples[:, i]))
+        # Save prior bounds as attributes
+        bounds_grp = f.create_group("prior_bounds")
+        for i, param in enumerate(shared_context["parameters"]):
+            bounds_grp.attrs[param] = cp.asnumpy(shared_context["bounds"][i])
+        # Save fixed parameters
+        fixed_grp = f.create_group("fixed_parameters")
+        for k, v in shared_context["fixed_parameters"].items():
+            fixed_grp.attrs[k] = v
+        # Save true parameters
+        true_grp = f.create_group("true_parameters")
+        for k, v in true_parameters.items():
+            true_grp.attrs[k] = cp.asnumpy(v)
 
     fig, axs = plt.subplots(2, 1, figsize=(8, 6))
     result.plot_log_evidence(ax=axs[0])
     result.plot_metadata_history("temperature", ax=axs[1])
-    fig.savefig("state.png")
-
+    fig.savefig(outdir / "state.png")
+    truths = [true_parameters[param] for param in shared_context["parameters"]]
     fig = result.plot_corner(
-        truths=[true_chirp_mass, true_mass_ratio], bins=30
+        truths=truths,
+        bins=30,
+        labels=shared_context["parameters"],
     )
-    fig.savefig("posterior.png")
+    fig.savefig(outdir / "posterior.png")
 
 
 if __name__ == "__main__":
