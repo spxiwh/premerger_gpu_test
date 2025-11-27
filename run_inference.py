@@ -5,9 +5,11 @@ Requires installing sequince package from: https://github.com/sequince-dev/sequi
 You may also need to install emcee to get it working (its meant to be optional
 but we missed an import).
 """
+import argparse
 from pathlib import Path
 from run_single_likelihood_batch_optimized import _bbhx_fd, _get_buffers, _ZERO_TD_F64
 import run_single_likelihood_batch as orig  # reuse initialization
+from config import load_config
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,6 +22,13 @@ from sequince.prebuilt_samplers import make_standard_bayesian_smc
 from sequince.callbacks import StatePlot, TracePlot
 from sequince.posterior import draw_additional_samples
 from orng import ArrayRNG
+
+
+def create_parser():
+    parser = argparse.ArgumentParser(description="Run LISA SMBH binary inference with SMC on GPU.")
+    parser.add_argument("config", type=Path, help="Path to the configuration YAML file.")
+    return parser
+
 
 def _log_likelihood_batch(params, shared_context):
     # Batched likelihood copied and modified from run_single_likelihood_batch_optimized.py
@@ -187,18 +196,19 @@ def convert_to_parameters(particles, shared_context) -> dict:
         p['spin1z'][:] = particles[:, shared_context["parameters"].index("spin1z")]
     if "spin2z" in shared_context["parameters"]:
         p['spin2z'][:] = particles[:, shared_context["parameters"].index("spin2z")]
+    if "distance" in shared_context["parameters"]:
+        p['distance'][:] = particles[:, shared_context["parameters"].index("distance")]
     # Set fixed parameters
     for k, v in shared_context["fixed_parameters"].items():
         p[k][:] = v
     return p
 
 
-def main() -> None:
+def main(args) -> None:
     # Create a CuPy RNG
     rng = ArrayRNG(backend='cupy', seed=42)
 
-    cutoff_time_days = 7
-
+    cfg = load_config(args.config)
 
     # Enable logging
     configure_logging()
@@ -210,7 +220,7 @@ def main() -> None:
     shared_context['delta_t'] = 5
     shared_context['flen'] = shared_context['tlen']//2 + 1
     # Cutoff time for pre-merger
-    shared_context['cutoff_time'] = 86400*cutoff_time_days
+    shared_context['cutoff_time'] = 86400*cfg.analysis.cutoff_days
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
     shared_context['data_file'] = 'signal_0_new.hdf'
@@ -253,24 +263,33 @@ def main() -> None:
         "coa_phase": (0, 2*cp.pi),
         "spin1z": (-0.99, 0.99),
         "spin2z": (-0.99, 0.99),
-        "distance": (1e4, 1e5),
+        "distance": (1e4, 5e4),
     }
 
     # Parameters to sample
     # We sample in the sin/cos of angles to get uniform priors since
     # these are easier to handle in a rectangular box
-    shared_context["parameters"] = [
+
+    known_parameters = [
         "chirp_mass",
         "mass_ratio",
         "tc",
-        # "spin1z",
-        # "spin2z",
+        "spin1z",
+        "spin2z",
         "eclipticlongitude",
         "sin_eclipticlatitude",
         "cos_inclination",
         "polarization",
         "coa_phase",
+        "distance",
     ]
+
+    if len(cfg.analysis.parameters) == 0:
+        parameters = known_parameters
+    else:
+        parameters = cfg.analysis.parameters
+    shared_context["parameters"] = parameters
+
     for param in shared_context["parameters"]:
         if param not in prior_bounds:
             raise ValueError(f"No prior bounds specified for parameter: {param}")
@@ -304,15 +323,19 @@ def main() -> None:
 
     dims = len(shared_context["parameters"])
 
-    label = f"sampling_parameters_" + "_".join(shared_context["parameters"]) + "_settings"
-    outdir = Path("lisa_smbh_inference_results") / f"{cutoff_time_days}days" / label
+    label = f"sampling_parameters_" + "_".join(shared_context["parameters"]) + cfg.label_suffix
+    outdir = Path(cfg.outdir) / f"{cfg.analysis.cutoff_days}days" / label
     outdir.mkdir(parents=True, exist_ok=True)
     print(f"Results will be saved to: {outdir}")
+    # Save config for reference
+    with open(outdir / "config_used.yaml", "w") as f:
+        import yaml
+        yaml.dump(cfg.model_dump(), f)
 
     # Initialize particles from the prior
     # Real runs will need more
     print("Initializing particles...")
-    n_particles = 500
+    n_particles = cfg.sampler.n_particles
     initial_particles = rng.uniform(low=shared_context["bounds"][:, 0], high=shared_context["bounds"][:, 1], size=(n_particles, dims))
     initial_log_weights = cp.full((n_particles,), -cp.log(cp.array(n_particles)))
     initial_state = ParticleState(
@@ -326,12 +349,12 @@ def main() -> None:
     smc, _, base_shared_context = make_standard_bayesian_smc(
         log_prior=log_prior,
         log_likelihood=log_likelihood,
-        target_ess_ratio=0.9,
+        target_ess_ratio=cfg.sampler.target_ess_ratio,
         max_temperature=1.0,
         min_delta=1e-8,
         always_resample=True,
         mutation="minipcn",
-        mutation_n_steps=100,    # May need more steps
+        mutation_n_steps=cfg.sampler.mutation_n_steps,    # May need more steps
         particle_transform="affine",
         auto_normalize=True,
         callbacks=[
@@ -344,9 +367,23 @@ def main() -> None:
 
     print("Running SMC inference...")
     result = smc.run(initial_state, rng=rng, shared_context=shared_context)
-
     print("SMC inference completed.")
-    posterior_samples = result.posterior_samples()
+
+    if cfg.sampler.n_final_particles is not None:
+        print("Drawing additional samples from prior for mutation kernel...")
+        posterior_state = draw_additional_samples(
+            log_prior=log_prior,
+            log_likelihood=log_likelihood,
+            result=result,
+            rng=rng,
+            n_particles=cfg.sampler.n_final_particles,
+            mutation="minipcn",
+            mutation_n_steps=cfg.sampler.mutation_n_steps,
+        )
+
+        posterior_samples = posterior_state.particles
+    else:
+        posterior_samples = result.posterior_samples()
 
     with h5py.File(outdir / "posterior_samples.h5", "w") as f:
         for i, param in enumerate(shared_context["parameters"]):
@@ -378,4 +415,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(create_parser().parse_args())
