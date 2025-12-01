@@ -7,7 +7,7 @@ but we missed an import).
 """
 import argparse
 from pathlib import Path
-from run_single_likelihood_batch_optimized import _bbhx_fd, _get_buffers, _ZERO_TD_F64
+from run_single_likelihood_batch_optimized import _bbhx_fd, _get_buffers, _ZERO_TD_F64, log_likelihood_optimized
 import run_single_likelihood_batch as orig  # reuse initialization
 from config import load_config
 
@@ -17,6 +17,7 @@ import cupy as cp
 import h5py
 
 from sequince import ParticleState
+from sequince.steps.base import StepContext
 from sequince.logging_utils import configure_logging
 from sequince.prebuilt_samplers import make_standard_bayesian_smc
 from sequince.callbacks import StatePlot, TracePlot
@@ -204,15 +205,7 @@ def convert_to_parameters(particles, shared_context) -> dict:
     return p
 
 
-def main(args) -> None:
-    # Create a CuPy RNG
-    rng = ArrayRNG(backend='cupy', seed=42)
-
-    cfg = load_config(args.config)
-
-    # Enable logging
-    configure_logging()
-
+def initialize_shared_context(cutoff_days: float) -> dict:
     shared_context = {}
     shared_context['tlen'] = 2592000
     shared_context['sample_rate'] = 0.2
@@ -220,7 +213,7 @@ def main(args) -> None:
     shared_context['delta_t'] = 5
     shared_context['flen'] = shared_context['tlen']//2 + 1
     # Cutoff time for pre-merger
-    shared_context['cutoff_time'] = 86400*cfg.analysis.cutoff_days
+    shared_context['cutoff_time'] = 86400*cutoff_days
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
     shared_context['data_file'] = 'signal_0_new.hdf'
@@ -237,7 +230,10 @@ def main(args) -> None:
     shared_context['approximant'] = 'BBHX_PhenomD'
     shared_context['t_offset'] = 7365189.431698299
     shared_context['mode_array'] = [(2,2)]
+    return shared_context
 
+
+def get_true_parameters() -> dict:
     true_parameters = {
         "mass1": 1e6,
         "mass2": 1e6,
@@ -251,7 +247,10 @@ def main(args) -> None:
         "coa_phase": 2.661901610522322,
         "tc": int(30*86400),    # True coalescence time in the original data
     }
+    return true_parameters
 
+
+def get_prior_bounds() -> dict:
     prior_bounds = {
         "chirp_mass": (8e5, 9e5),
         "mass_ratio": (0.5, 1.0),
@@ -265,11 +264,13 @@ def main(args) -> None:
         "spin2z": (-0.99, 0.99),
         "distance": (1e4, 5e4),
     }
+    return prior_bounds
 
-    # Parameters to sample
-    # We sample in the sin/cos of angles to get uniform priors since
-    # these are easier to handle in a rectangular box
 
+def get_shared_context_and_true_parameters(cfg) -> tuple[dict, dict]:
+    shared_context = initialize_shared_context(cfg.analysis.cutoff_days)
+    true_parameters = get_true_parameters()
+    prior_bounds = get_prior_bounds()
     known_parameters = [
         "chirp_mass",
         "mass_ratio",
@@ -317,9 +318,22 @@ def main(args) -> None:
     )
     true_parameters["sin_eclipticlatitude"] = np.sin(true_parameters["eclipticlatitude"])
     true_parameters["cos_inclination"] = np.cos(true_parameters["inclination"])
+    return shared_context, true_parameters
+
+
+def main(args) -> None:
+    # Create a CuPy RNG
+    rng = ArrayRNG(backend='cupy', seed=42)
+
+    cfg = load_config(args.config)
+
+    # Enable logging
+    configure_logging()
+
+    shared_context, true_parameters = get_shared_context_and_true_parameters(cfg)
 
     # Set batch size for likelihood evaluations
-    shared_context["batch_size"] = 200
+    shared_context["batch_size"] = cfg.analysis.batch_size
 
     dims = len(shared_context["parameters"])
 
@@ -331,6 +345,42 @@ def main(args) -> None:
     with open(outdir / "config_used.yaml", "w") as f:
         import yaml
         yaml.dump(cfg.model_dump(), f)
+
+    # Plot the likelihood surface for chirp_mass with all other params fixed
+    chirp_mass_values = cp.linspace(8e5, 9e5, 200, dtype=cp.float64)
+    context = StepContext(0, shared=shared_context)
+    particles = cp.full((len(chirp_mass_values), len(shared_context["parameters"])), cp.nan, dtype=cp.float64)
+    for i, param in enumerate(shared_context["parameters"]):
+        particles[:, i] = true_parameters[param]
+    particles[:, shared_context["parameters"].index("chirp_mass")] = chirp_mass_values
+    # Map polarization to [0, pi]
+    if "polarization" in shared_context["parameters"]:
+        pol_idx = shared_context["parameters"].index("polarization")
+        particles[:, pol_idx] = particles[:, pol_idx] % cp.pi
+
+    logp = log_prior(particles, context)
+    print("Log prior:", logp)
+
+    # Check which parameters are out of bounds
+    out_of_bounds = cp.any((particles < shared_context["bounds"][:, 0]) | (particles > shared_context["bounds"][:, 1]), axis=0)
+    print(f"Out of bounds: {[k for k, out in zip(shared_context['parameters'], out_of_bounds) if out]}", )
+
+    logl = log_likelihood(particles, context)
+
+    print("Log likelihood:", logl)
+    plt.figure(figsize=(8,5))
+    plt.plot(cp.asnumpy(chirp_mass_values), cp.asnumpy(logl))
+    plt.axvline(true_parameters["chirp_mass"], color='r', linestyle='--', label='True value')
+    plt.xlabel("Chirp Mass")
+    plt.ylabel("Log-Likelihood")
+    plt.title("Log-Likelihood vs Chirp Mass (other params fixed)")
+    plt.legend()
+    plt.savefig(outdir / "likelihood_chirp_mass.png")
+
+
+    if cfg.skip_sampling:
+        print("Skipping sampling as per configuration.")
+        return
 
     # Initialize particles from the prior
     # Real runs will need more
