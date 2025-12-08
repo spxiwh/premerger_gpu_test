@@ -43,7 +43,6 @@ def _log_likelihood_batch(params, shared_context):
         delta_f=shared_context['delta_f'],
         f_final=shared_context['f_final'],
         mode_array=shared_context['mode_array'],
-        t_offset=shared_context['t_offset'],
         cache_generator=shared_context['cache_generator'],
         **params
     )
@@ -228,7 +227,6 @@ def initialize_shared_context(cutoff_days: float) -> dict:
     shared_context['t_obs_start'] = shared_context['tlen']
     shared_context['f_final'] = shared_context['sample_rate'] / 2
     shared_context['approximant'] = 'BBHX_PhenomD'
-    shared_context['t_offset'] = 7365189.431698299
     shared_context['mode_array'] = [(2,2)]
     return shared_context
 
