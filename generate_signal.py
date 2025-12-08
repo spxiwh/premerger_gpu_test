@@ -30,11 +30,10 @@ def generate_signal(
     inclination=0.9238365050097769,
     polarization=3.4236020095353483,
     coa_phase=2.661901610522322,
-    tc=30*86400,  # 30 days in seconds
+    tc=30*86400,  # 30 days in seconds, 1000s added for safety
     # Waveform settings
     tdi='1.5',
     t_obs_start=2592000,  # 30 days
-    t_offset=7365189.431698299,
     approximant='BBHX_PhenomD',
     mode_array=None,
     # Data settings
@@ -69,8 +68,6 @@ def generate_signal(
         TDI version ('1.5' or '2.0')
     t_obs_start : float
         Observation start time before merger (seconds)
-    t_offset : float
-        Time offset for LISA frame
     approximant : str
         Waveform approximant ('BBHX_PhenomD' or 'BBHX_PhenomHM')
     mode_array : list or None
@@ -125,7 +122,6 @@ def generate_signal(
         delta_f=delta_f,
         f_final=f_final,
         mode_array=mode_array,
-        t_offset=t_offset,
         **params,
     )
     
@@ -213,7 +209,6 @@ def generate_signal(
         meta.attrs['tc'] = tc
         meta.attrs['tdi'] = tdi
         meta.attrs['t_obs_start'] = t_obs_start
-        meta.attrs['t_offset'] = t_offset
         meta.attrs['approximant'] = approximant
         meta.attrs['sample_rate'] = sample_rate
         meta.attrs['delta_f'] = delta_f
@@ -296,7 +291,6 @@ def main():
         tc=args.tc,
         tdi=args.tdi,
         t_obs_start=args.t_obs_start,
-        t_offset=args.t_offset,
         approximant=args.approximant,
         sample_rate=args.sample_rate,
         tlen=args.tlen,
