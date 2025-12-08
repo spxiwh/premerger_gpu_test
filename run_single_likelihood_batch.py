@@ -85,7 +85,6 @@ def log_likelihood(params, shared_context):
         delta_f=shared_context['delta_f'],
         f_final=shared_context['f_final'],
         mode_array=shared_context['mode_array'],
-        t_offset=shared_context['t_offset'],
         **params
     )
 
@@ -214,10 +213,10 @@ def main() -> None:
     shared_context['delta_f'] = 1./shared_context['tlen']
     shared_context['delta_t'] = 5
     shared_context['flen'] = shared_context['tlen']//2 + 1
-    shared_context['cutoff_time'] = 86400*7
+    shared_context['cutoff_time'] = 86400*1
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
-    shared_context['data_file'] = 'signal_0.hdf'
+    shared_context['data_file'] = 'signal_0_new.hdf'
     shared_context['psd_file'] = 'model_AE_TDI1_SMOOTH_optimistic.txt.gz'
 
     initialization(shared_context)
@@ -254,7 +253,6 @@ def main() -> None:
     shared_context['f_final'] = shared_context['sample_rate'] / 2
     # cutoff_deltat, are they needed?
     shared_context['approximant'] = 'BBHX_PhenomD'
-    shared_context['t_offset'] = 7365189.431698299
     shared_context['mode_array'] = [(2,2)]
     
     # Always use 100-waveform batch
