@@ -75,7 +75,6 @@ def log_likelihood_optimized(params, shared_context):
         delta_f=shared_context['delta_f'],
         f_final=shared_context['f_final'],
         mode_array=shared_context['mode_array'],
-        t_offset=shared_context['t_offset'],
         **params
     )
 
@@ -157,7 +156,7 @@ def main():
     shared_context['cutoff_time'] = 86400*7
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
-    shared_context['data_file'] = 'signal_0.hdf'
+    shared_context['data_file'] = 'signal_0_new.hdf'
     shared_context['psd_file'] = 'model_AE_TDI1_SMOOTH_optimistic.txt.gz'
 
     orig.initialization(shared_context)
@@ -167,7 +166,6 @@ def main():
     shared_context['t_obs_start'] = shared_context['tlen']
     shared_context['f_final'] = shared_context['sample_rate'] / 2
     shared_context['approximant'] = 'BBHX_PhenomD'
-    shared_context['t_offset'] = 7365189.431698299
     shared_context['mode_array'] = [(2,2)]
 
     # Params and run

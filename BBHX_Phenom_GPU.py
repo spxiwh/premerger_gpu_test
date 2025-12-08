@@ -382,6 +382,7 @@ def _bbhx_fd(
     lgc = (t_ref > 1./df).any() if hasattr(t_ref, '__getitem__') else t_ref > 1./df
     if lgc:
         raise ValueError("t_obs_end is longer than data length. BBHx will do weird things in this case. Hoping to avoid %f %f" % (t_obs_end, 1./delta_f))
+
     wave = wave_gen(
         m1, m2, a1, a2,
         dist, phi_ref, f_ref, inc, lam,

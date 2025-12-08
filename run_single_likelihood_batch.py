@@ -213,7 +213,7 @@ def main() -> None:
     shared_context['delta_f'] = 1./shared_context['tlen']
     shared_context['delta_t'] = 5
     shared_context['flen'] = shared_context['tlen']//2 + 1
-    shared_context['cutoff_time'] = 86400*1
+    shared_context['cutoff_time'] = 86400*7
     shared_context['kernel_length'] = 17280
     shared_context['extra_forward_zeroes'] = 8640
     shared_context['data_file'] = 'signal_0_new.hdf'
