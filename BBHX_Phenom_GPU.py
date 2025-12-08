@@ -251,15 +251,6 @@ def _bbhx_fd(
         f_ref = np.float64(0.0)
     
     phi_ref = params['coa_phase']  # phase at f_ref
-    if 't_offset' in params:
-        if params['t_offset'] == 'TIME_OFFSET_20_DEGREES':
-            t_offset = TIME_OFFSET_20_DEGREES
-        else:
-            t_offset = params['t_offset']
-    else:
-        raise Exception("Must set `t_offset`, if you don't have a preferred value, \
-please set it to be the default value %f, which will put LISA behind \
-the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     t_obs_start = params['t_obs_start']
     mode_array = list(params["mode_array"])
     num_interp = int(num_interp)
@@ -268,7 +259,7 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     
 
     if ref_frame == 'LISA':
-        t_ref_lisa = params['tc'] + t_offset
+        t_ref_lisa = params['tc']
         lam = params['eclipticlongitude']
         beta = params['eclipticlatitude']
         psi = params['polarization']
@@ -281,19 +272,7 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
             t0=0
         )
     elif ref_frame == 'SSB':
-        t_ref = params['tc'] + t_offset
-        lam = params['eclipticlongitude']
-        beta = params['eclipticlatitude']
-        psi = params['polarization']
-        # Don't need to update variable names,
-        # because wave_gen receives parameters in SSB frame.
-        t_ref_lisa, _, _, _ = ssb_to_lisa(
-            t_ssb=t_ref,
-            longitude_ssb=lam,
-            latitude_ssb=beta,
-            polarization_ssb=psi,
-            t0=0
-        )
+        raise ValueError('Not supporting SSB right now')
     else:
         err_msg = f"Don't recognise reference frame {ref_frame}. Known frames are 'LISA' and 'SSB'."
         raise ValueError(err_msg)
@@ -395,12 +374,14 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
     fill = True # See the BBHX documentation
     squeeze = True # See the BBHX documentation
     shift_t_limits = False # Times are relative to merger
-    t_obs_end = 0.0 # Generates ringdown as well!
 
     # NOTE: This does not allow for the separation of multiple modes into
     # their own streams. All modes requested are combined into one stream.
-    t_obs_start = t_ref - t_obs_start
-    t_obs_end = t_ref
+    t_obs_start = 0
+    #t_obs_end = t_ref
+    lgc = (t_ref > 1./df).any() if hasattr(t_ref, '__getitem__') else t_ref > 1./df
+    if lgc:
+        raise ValueError("t_obs_end is longer than data length. BBHx will do weird things in this case. Hoping to avoid %f %f" % (t_obs_end, 1./delta_f))
     wave = wave_gen(
         m1, m2, a1, a2,
         dist, phi_ref, f_ref, inc, lam,
@@ -411,7 +392,7 @@ the Earth by ~20 degrees." % TIME_OFFSET_20_DEGREES)
         fill=fill,
         squeeze=squeeze,
         t_obs_start=t_obs_start / YRSID_SI,
-        t_obs_end=t_obs_end,
+        #t_obs_end=t_obs_end / YRSID_SI,
         compress=compress,
         length=length,
     )
